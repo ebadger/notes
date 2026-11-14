@@ -55,9 +55,9 @@ revocation; no arbitrary timing sleep stands in for the required ordering.
 | Content | Required string fields, trimming, exact UTF-16 title and decoded UTF-8 body boundaries, empty body, unknown fields, immutable ownership/grants, UTC timestamps. |
 | Sharing | Defined enums, required/forbidden team IDs, unknown teams, duplicate targets, complete replacement, atomic failure, shared version increments. |
 | Preconditions | Missing `428`, stale `412`, invalid `400`, strong canonical tags, unsupported weak/wildcard/list/zero/leading-zero/overflow forms, authorization before version disclosure. |
-| HTTP | Problem Details and `no-store`, malformed route IDs, exact 1 MiB request boundaries using both Content-Length and streamed HTTP/1.1 chunked bodies. |
+| HTTP | Problem Details and `no-store`, sanitized unexpected failures with trace IDs, malformed route IDs, exact 1 MiB request boundaries using both Content-Length and streamed HTTP/1.1 chunked bodies. |
 | Pagination | Defaults and validation, stable timestamp/UUID ordering, full pages after access filtering, end offsets, no duplicate notes. |
-| Concurrency | Competing content saves, competing sharing replacements, and deterministically ordered editor/revocation writes. |
+| Concurrency | Competing content saves and sharing replacements, plus deterministically ordered editor/revocation and update/delete races. |
 | Database | Check constraints, foreign keys, partial unique indexes, membership/key uniqueness, cascading grants, migrations, idempotent seeding, restart persistence, no note resurrection, API-key hash rotation. |
 
 Application restart tests do not restart a shared PostgreSQL server. A real

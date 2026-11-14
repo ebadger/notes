@@ -214,6 +214,36 @@ public sealed class ContentContractTests(PostgreSqlFixture fixture) : ApiTestBas
         }
     }
 
+    [Fact]
+    public async Task Unexpected_database_errors_return_sanitized_problem_details_with_a_trace_id()
+    {
+        var note = await CreateNoteAsync(title: $"Confidential {Guid.NewGuid():N}",
+            body: $"Confidential body {Guid.NewGuid():N}");
+        await Fixture.ExecuteAsync("ALTER TABLE notes RENAME COLUMN body TO test_unavailable_body");
+        try
+        {
+            using var response = await Alice.GetAsync($"/api/notes/{note.Note.Id}");
+            await AssertProblemAsync(response, HttpStatusCode.InternalServerError, noVersion: true);
+            var text = await response.Content.ReadAsStringAsync();
+            using var json = JsonDocument.Parse(text);
+            Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("traceId").GetString()));
+            Assert.DoesNotContain(note.Note.Title, text);
+            Assert.DoesNotContain(note.Note.Body, text);
+            Assert.DoesNotContain(Fixture.ApiKey(TestUser.Alice), text);
+            Assert.DoesNotContain("Npgsql", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("42703", text);
+            Assert.DoesNotContain("test_unavailable_body", text);
+            Assert.False(json.RootElement.TryGetProperty("stackTrace", out _));
+            Assert.False(json.RootElement.TryGetProperty("exception", out _));
+        }
+        finally
+        {
+            await Fixture.ExecuteAsync("ALTER TABLE notes RENAME COLUMN test_unavailable_body TO body");
+        }
+
+        Assert.Equal(note, await GetNoteAsync(Alice, note.Note.Id));
+    }
+
     private async Task<HttpResponseMessage> WriteAsync(bool update, string json)
     {
         if (!update)

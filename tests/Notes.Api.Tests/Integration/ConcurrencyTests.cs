@@ -78,49 +78,12 @@ public sealed class ConcurrencyTests(PostgreSqlFixture fixture) : ApiTestBase(fi
         }
 
         var editorSnapshot = await GetNoteAsync(Bob, note.Note.Id);
-        await using var blocker = await Fixture.OpenConnectionAsync();
-        await using var transaction = await blocker.BeginTransactionAsync();
-        await using (var lockRow = new NpgsqlCommand(
-            "SELECT id FROM notes WHERE id = @id FOR UPDATE", blocker, transaction))
-        {
-            lockRow.Parameters.AddWithValue("id", note.Note.Id);
-            Assert.Equal(note.Note.Id, await lockRow.ExecuteScalarAsync());
-        }
-
-        Task<HttpResponseMessage>? revocation = null;
-        Task<HttpResponseMessage>? edit = null;
-        bool ownerWasBlocked;
-        bool bothWereBlocked;
-        try
-        {
-            // The owner queues first. Both requests must reach their database CAS before release.
-            revocation = PutSharingAsync(Alice, note.Note.Id, editorSnapshot.ETag);
-            ownerWasBlocked = await WaitForBlockedWritesAsync(1);
-            edit = PutContentAsync(Bob, note.Note.Id, editorSnapshot.ETag,
-                "Revoked editor must not win", "Revoked editor must not win");
-            bothWereBlocked = await WaitForBlockedWritesAsync(2);
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            if (revocation is not null)
-            {
-                (await revocation).Dispose();
-            }
-
-            if (edit is not null)
-            {
-                (await edit).Dispose();
-            }
-
-            throw;
-        }
-
-        using var revoked = await revocation;
-        using var rejected = await edit;
-        Assert.True(ownerWasBlocked, "The owner never reached a blocked database UPDATE; the race was not established.");
-        Assert.True(bothWereBlocked, "Both authorized writes must be observed waiting on database locks.");
+        var race = await RunOrderedDatabaseRaceAsync(note.Note.Id,
+            () => PutSharingAsync(Alice, note.Note.Id, editorSnapshot.ETag),
+            () => PutContentAsync(Bob, note.Note.Id, editorSnapshot.ETag,
+                "Revoked editor must not win", "Revoked editor must not win"));
+        using var revoked = race.First;
+        using var rejected = race.Second;
         Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
         Assert.Equal(Tag(3), revoked.Headers.ETag?.Tag);
         await AssertProblemAsync(rejected, HttpStatusCode.PreconditionFailed);
@@ -132,6 +95,82 @@ public sealed class ConcurrencyTests(PostgreSqlFixture fixture) : ApiTestBase(fi
         Assert.Empty(sharing.RootElement.GetProperty("grants").EnumerateArray());
         using var denied = await Bob.GetAsync($"/api/notes/{note.Note.Id}");
         await AssertProblemAsync(denied, HttpStatusCode.NotFound, noVersion: true);
+    }
+
+    [Fact]
+    public async Task Deletion_authorized_at_an_old_version_cannot_delete_a_concurrently_updated_note()
+    {
+        var note = await CreateNoteAsync();
+        var race = await RunOrderedDatabaseRaceAsync(note.Note.Id,
+            () => PutContentAsync(Alice, note.Note.Id, note.ETag, "Concurrent edit survives"),
+            () => SendAsync(Alice, HttpMethod.Delete, $"/api/notes/{note.Note.Id}", etag: note.ETag));
+        using var saved = race.First;
+        using var staleDelete = race.Second;
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        await AssertProblemAsync(staleDelete, HttpStatusCode.PreconditionFailed);
+        var current = await GetNoteAsync(Alice, note.Note.Id);
+        Assert.Equal(await ReadNoteAsync(saved), current);
+        Assert.Equal(2, current.Note.Version);
+        Assert.Equal("Concurrent edit survives", current.Note.Title);
+    }
+
+    private async Task<(HttpResponseMessage First, HttpResponseMessage Second)> RunOrderedDatabaseRaceAsync(
+        Guid noteId,
+        Func<Task<HttpResponseMessage>> startFirst,
+        Func<Task<HttpResponseMessage>> startSecond)
+    {
+        await using var blocker = await Fixture.OpenConnectionAsync();
+        await using var transaction = await blocker.BeginTransactionAsync();
+        await using (var lockRow = new NpgsqlCommand(
+            "SELECT id FROM notes WHERE id = @id FOR UPDATE", blocker, transaction))
+        {
+            lockRow.Parameters.AddWithValue("id", noteId);
+            Assert.Equal(noteId, await lockRow.ExecuteScalarAsync());
+        }
+
+        Task<HttpResponseMessage>? firstTask = null;
+        Task<HttpResponseMessage>? secondTask = null;
+        bool firstWasBlocked;
+        bool bothWereBlocked;
+        try
+        {
+            // The first mutation queues first; both must reach their database CAS before release.
+            firstTask = startFirst();
+            firstWasBlocked = await WaitForBlockedWritesAsync(1);
+            secondTask = startSecond();
+            bothWereBlocked = await WaitForBlockedWritesAsync(2);
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            if (firstTask is not null)
+            {
+                (await firstTask).Dispose();
+            }
+
+            if (secondTask is not null)
+            {
+                (await secondTask).Dispose();
+            }
+
+            throw;
+        }
+
+        var first = await firstTask;
+        var second = await secondTask;
+        try
+        {
+            Assert.True(firstWasBlocked, "The first mutation never reached a blocked database write.");
+            Assert.True(bothWereBlocked, "Both authorized mutations must be observed waiting on database locks.");
+            return (first, second);
+        }
+        catch
+        {
+            first.Dispose();
+            second.Dispose();
+            throw;
+        }
     }
 
     private async Task<bool> WaitForBlockedWritesAsync(int expected)
@@ -146,7 +185,7 @@ public sealed class ConcurrencyTests(PostgreSqlFixture fixture) : ApiTestBase(fi
               AND application_name = @application
               AND state = 'active'
               AND wait_event_type = 'Lock'
-              AND query ~* 'UPDATE[[:space:]]+"?notes"?'
+              AND query ~* '(UPDATE|DELETE[[:space:]]+FROM)[[:space:]]+"?notes"?'
             """, connection);
         command.Parameters.AddWithValue("application", Fixture.ApplicationName);
         while (timer.Elapsed < TimeSpan.FromSeconds(15))
