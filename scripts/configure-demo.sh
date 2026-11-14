@@ -29,5 +29,7 @@ umask 077
         'NOTES_PORT=8080' \
         'NOTES_TEST_PORT=15432' > .env
 )
+# A default ACL on the directory overrides the umask, so restrict the file explicitly.
+chmod 600 .env
 printf 'Created private .env with independent random database credentials and demo keys.\n'
 printf 'Keep this file private and reuse it when restarting the existing database volume.\n'
