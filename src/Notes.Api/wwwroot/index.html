@@ -5,178 +5,196 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Notes service - manual tests</title>
+  <title>Notes demo</title>
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to manual tests</a>
   <header class="page-header">
-    <p class="eyebrow">Local demonstration</p>
-    <h1>Notes service workbench</h1>
-    <p>Exercise the same-origin <code>/api</code> service. Results are snapshots, not live views. Markdown stays plain text.</p>
+    <h1>Notes demo</h1>
+    <p>Choose a user, open a note, and try editing or sharing it.</p>
   </header>
 
   <main id="main">
     <noscript>This test page needs JavaScript. It does not submit forms or send credentials without it.</noscript>
     <section class="card" aria-labelledby="identity-heading">
-      <h2 id="identity-heading">Request identity</h2>
+      <h2 id="identity-heading">Demo access</h2>
       <div class="fields">
         <div class="field">
-          <label for="identity">Demo label</label>
+          <label for="identity">Demo user</label>
           <select id="identity" autocomplete="off">
-            <option>Alice</option>
-            <option>Bob</option>
-            <option>Carol</option>
-            <option>Dana</option>
+            <option value="Alice">Alice</option>
+            <option value="Bob">Bob</option>
+            <option value="Carol">Carol</option>
+            <option value="Dana">Dana</option>
           </select>
         </div>
-        <div class="field wide">
-          <label for="api-key">API key <span class="optional">(password field)</span></label>
-          <input id="api-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" aria-describedby="key-help">
+        <div class="actions">
+          <button id="load-demo-keys" type="button" class="secondary">Reload demo users</button>
         </div>
       </div>
-      <p id="key-help" class="hint">Paste a configured demo key. The key, not this label, determines your permissions. Leave it blank to test 401. Keys stay only in this tab's memory; changing a label or key clears all displayed resources. Reloading forgets every key.</p>
-      <div class="actions">
-        <button id="forget-keys" type="button" class="secondary">Forget all keys and results</button>
-        <a href="/" target="_blank" rel="noopener noreferrer">Open an independent test tab</a>
-      </div>
-      <p id="identity-status" class="status" role="status">No key configured. Requests will be unauthenticated.</p>
+      <p id="demo-access-help" class="hint">In local demo mode, users are ready to select: anyone who can open this page can use all four identities. Keys come from the service at runtime and stay only in this tab's memory. The key, not the label, determines access.</p>
+      <details id="manual-key">
+        <summary>Manual key and authentication checks</summary>
+        <div class="fields">
+          <div class="field wide">
+            <label for="api-key">API key <span class="optional">(password field)</span></label>
+            <input id="api-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" aria-describedby="demo-access-help">
+          </div>
+          <button id="use-key" type="button">Use key</button>
+          <button id="forget-keys" type="button" class="secondary">Forget keys</button>
+        </div>
+        <p class="hint">Leave the key blank to test 401. Changing a key clears all fetched content.</p>
+      </details>
+      <p id="identity-status" class="status" role="status">Loading demo users...</p>
     </section>
 
-    <details class="card instructions">
-      <summary>Permission, concurrency, and revocation walkthrough</summary>
-      <ol>
-        <li><strong>Private note:</strong> use Alice's key to create a note. Copy its ID before changing identity, because switching clears this page. Other users should receive 404 until it is shared.</li>
-        <li><strong>Permission demo:</strong> discover teams, get the note's sharing as Alice, then add Team A <code>edit</code> and organization <code>read</code> grants and replace sharing. Bob can edit through Team A; Carol can only read through the organization; Dana matches both and can edit. Only Alice, the owner of this note, can read/change sharing or delete it. Buttons never assume permission from a demo name.</li>
-        <li><strong>Stale save:</strong> load a note into editor A and clone its fetched snapshot to B. Save A, then edit and save B. B must receive 412 without losing its draft or original ETag. Load the latest version into the other slot to compare; preserve your changes, reload, reconcile, and explicitly save again.</li>
-        <li><strong>Preconditions:</strong> choose an omitted header for 428, or a manual value for stale/malformed tests. Examples: <code>"1"</code> (stale when an older version), <code>W/"1"</code>, <code>*</code>, and <code>"1", "2"</code> (unsupported). Content, sharing, and deletion use the same note version, but each panel keeps its own fetched ETag.</li>
-        <li><strong>Revocation:</strong> use independent tabs for Alice and Bob. Load Bob's editable snapshot, then replace sharing with empty grants as Alice. New reads by Bob must return 404; his old save must not succeed (404 after revocation, or 412 if an authorized save races with the version change). Already returned content cannot be recalled.</li>
-        <li><strong>Atomic validation:</strong> edit sharing JSON to include a duplicate grant, unknown team, or invalid audience. A rejected replacement must leave sharing and version unchanged. Reload to verify. Use limit/offset and next/previous to check access-filtered paging and absence of duplicate notes for Dana.</li>
-      </ol>
-    </details>
-
     <section class="card" aria-labelledby="list-heading">
-      <h2 id="list-heading">Accessible notes</h2>
-      <form id="list-form" autocomplete="off">
+      <h2 id="list-heading">Notes</h2>
+      <form id="list-form" autocomplete="off" novalidate>
         <fieldset>
           <legend class="visually-hidden">List paging</legend>
-          <div class="fields">
-            <div class="field small">
-              <label for="list-limit">Limit (1-100)</label>
-              <input id="list-limit" type="number" min="1" max="100" step="1" value="20" required>
-            </div>
-            <div class="field small">
-              <label for="list-offset">Offset</label>
-              <input id="list-offset" type="number" min="0" step="1" value="0" required>
-            </div>
-            <div class="actions">
-              <button type="submit">Load page</button>
-              <button id="previous-page" type="button" class="secondary" disabled>Previous</button>
-              <button id="next-page" type="button" class="secondary" disabled>Next</button>
-            </div>
+          <div class="actions">
+            <button type="submit">Refresh</button>
+            <button id="new-note" type="button" class="secondary">New note</button>
+            <button id="previous-page" type="button" class="secondary" disabled>Previous</button>
+            <button id="next-page" type="button" class="secondary" disabled>Next</button>
           </div>
+          <details>
+            <summary>Paging options</summary>
+            <div class="fields">
+              <div class="field small">
+                <label for="list-limit">Limit (1-100)</label>
+                <input id="list-limit" type="number" min="1" max="100" step="1" value="20" required>
+              </div>
+              <div class="field small">
+                <label for="list-offset">Offset</label>
+                <input id="list-offset" type="number" min="0" step="1" value="0" required>
+              </div>
+            </div>
+          </details>
         </fieldset>
         <p data-status class="status" role="status">No page loaded.</p>
       </form>
       <p id="list-page" class="hint"></p>
       <div class="table-scroll">
         <table>
-          <caption class="visually-hidden">Accessible note summaries; load details into an independent editor</caption>
-          <thead><tr><th scope="col">Title / ID</th><th scope="col">Owner / version</th><th scope="col">Open</th></tr></thead>
+          <caption class="visually-hidden">Notes accessible to the current API key</caption>
+          <thead><tr><th scope="col">Note</th><th scope="col">Open</th></tr></thead>
           <tbody id="note-list"></tbody>
         </table>
       </div>
     </section>
 
-    <div class="two-column">
-      <section class="card" aria-labelledby="create-heading">
-        <h2 id="create-heading">Create a private note</h2>
-        <form id="create-form" autocomplete="off">
-          <fieldset>
-            <legend class="visually-hidden">New note content</legend>
-            <label for="create-title">Title</label>
-            <input id="create-title" type="text" aria-describedby="content-help">
-            <label for="create-body">Markdown body</label>
-            <textarea id="create-body" rows="5" spellcheck="false"></textarea>
-            <p id="content-help" class="hint">The API validates a trimmed title of 1-200 UTF-16 units and a required body of up to 64 KiB UTF-8 (empty is allowed). This page does not trim or truncate your content.</p>
-            <button type="submit">Create private note</button>
+    <details id="create-panel" class="card">
+      <summary>New private note</summary>
+      <form id="create-form" autocomplete="off">
+        <fieldset>
+          <legend class="visually-hidden">New note content</legend>
+          <label for="create-title">Title</label>
+          <input id="create-title" type="text" aria-describedby="content-help">
+          <label for="create-body">Markdown body</label>
+          <textarea id="create-body" rows="5" spellcheck="false"></textarea>
+          <p id="content-help" class="hint">Title: 1-200 UTF-16 units after trimming. Body: up to 64 KiB UTF-8; empty is allowed. Markdown is stored as text.</p>
+          <button type="submit">Create private note</button>
+          <div id="created-result" hidden>
             <label for="created-id">Created note ID <span class="optional">(copy for another identity/tab)</span></label>
             <input id="created-id" type="text" readonly>
-            <button id="open-created" type="button" class="secondary" disabled>Open created snapshot in A</button>
-          </fieldset>
-          <p data-status class="status" role="status">No note created.</p>
-        </form>
-      </section>
+            <button id="open-created" type="button" class="secondary" disabled>Open created note</button>
+          </div>
+        </fieldset>
+        <p data-status class="status" role="status">No note created.</p>
+      </form>
+    </details>
 
-      <section class="card" aria-labelledby="teams-heading">
-        <h2 id="teams-heading">Team discovery</h2>
+    <div id="primary-editor"></div>
+
+    <details id="sharing-panel" class="card">
+      <summary>Sharing <span class="optional">(owner only)</span></summary>
+      <form id="sharing-form" autocomplete="off">
+        <fieldset>
+          <legend class="visually-hidden">Sharing snapshot and replacement</legend>
+          <p id="sharing-snapshot" class="metadata">Choose Sharing on an open note, or load the selected note below.</p>
+          <button id="load-selected-sharing" type="button" class="secondary" disabled>Load selected note's sharing</button>
+          <h3 class="draft-heading">Draft permissions</h3>
+          <ul id="sharing-summary" class="grant-summary"><li>Load sharing to see current access.</li></ul>
+          <div class="actions">
+            <button id="demo-sharing" type="button" class="secondary">Team A edits + organization reads</button>
+            <button id="empty-grants" type="button" class="secondary">Make private</button>
+            <button id="replace-sharing" type="button" disabled>Save sharing</button>
+          </div>
+          <p class="hint">The preset and Make private change the draft only. Save sharing applies it. Changing sharing also changes the note's version; reload the note before further edits.</p>
+          <details>
+            <summary>Custom permissions, JSON, and request options</summary>
+            <label for="sharing-id">Note ID</label>
+            <div class="fields">
+              <input id="sharing-id" type="text" class="field wide" spellcheck="false" autocapitalize="none">
+              <button type="submit">Get sharing</button>
+            </div>
+            <p>Fetched ETag: <output id="sharing-etag" class="tag">Not loaded</output></p>
+            <div data-preconditions></div>
+            <div class="grant-builder">
+              <h3>Grant helper <span class="optional">(changes the draft only)</span></h3>
+              <div class="fields">
+                <div class="field">
+                  <label for="grant-audience">Audience</label>
+                  <select id="grant-audience"><option value="team">Team</option><option value="organization">Organization</option></select>
+                </div>
+                <div class="field wide">
+                  <label for="grant-team">Team</label>
+                  <select id="grant-team" disabled><option value="">Get teams first</option></select>
+                </div>
+                <div class="field">
+                  <label for="grant-permission">Permission</label>
+                  <select id="grant-permission"><option value="read">Read</option><option value="edit">Edit (includes read)</option></select>
+                </div>
+              </div>
+              <div class="actions">
+                <button id="add-grant" type="button" class="secondary">Add / replace this grant in draft</button>
+              </div>
+            </div>
+            <label for="sharing-json">Replacement JSON</label>
+            <textarea id="sharing-json" rows="9" spellcheck="false" aria-describedby="sharing-help">{
+  "grants": []
+}</textarea>
+            <p id="sharing-help" class="hint">Save sends this entire JSON value, including invalid fields, to the API. Use a manual/omitted If-Match to test rejected writes without a sharing snapshot. Raw edits are not applied until you save.</p>
+          </details>
+        </fieldset>
+        <p data-status class="status" role="status">No sharing requested.</p>
+      </form>
+    </details>
+
+    <details id="advanced-tests" class="card instructions">
+      <summary>Advanced checks</summary>
+      <p>Normal saves use the fetched ETag. Snapshots are independent: no write retries, automatic merges, or cross-panel ETag updates.</p>
+      <button id="clone-selected" type="button" class="secondary" disabled>Keep a second snapshot of the selected note</button>
+      <ol>
+        <li><strong>Permissions:</strong> create as Alice and save the demo sharing preset. Bob can edit, Carol can only read, and Dana can edit through the strongest matching grant. Only the owner can delete or manage sharing; the server, never the demo label, decides.</li>
+        <li><strong>Stale saves:</strong> keep a second snapshot, save the main editor, then save the second snapshot. Expect 412 with its draft and ETag preserved. Load the latest in the other editor, preserve your changes, then reload and reconcile explicitly.</li>
+        <li><strong>Preconditions:</strong> expand a note's request options. Omit If-Match for 428; try <code>W/"1"</code>, <code>*</code>, or <code>"1", "2"</code> for 400. A stale <code>"1"</code> gives 412.</li>
+        <li><strong>Revocation:</strong> use separate tabs for Alice and Bob. After Alice saves Make private, Bob's new reads return 404 and his old save must fail (404, or 412 for a racing save). Already returned content cannot be recalled.</li>
+        <li><strong>Validation:</strong> use custom sharing JSON for duplicate grants or unknown teams. Rejected replacements must not change grants or version. Paging should never show inaccessible or duplicate notes.</li>
+      </ol>
+      <a href="/" target="_blank" rel="noopener noreferrer">Open an independent test tab</a>
+      <div id="secondary-editor"></div>
+      <details>
+        <summary>Team discovery</summary>
         <form id="teams-form" autocomplete="off">
           <fieldset>
             <legend class="visually-hidden">Available teams</legend>
-            <p class="hint">Discover team IDs for sharing. Discovery does not reveal or change memberships.</p>
+            <p class="hint">Teams load automatically with Refresh. This endpoint exposes IDs and names, not memberships.</p>
             <button type="submit">Get teams</button>
           </fieldset>
           <p data-status class="status" role="status">No teams loaded.</p>
         </form>
         <ul id="team-list" class="team-list"></ul>
-      </section>
-    </div>
+      </details>
+    </details>
 
-    <section aria-labelledby="editors-heading">
-      <h2 id="editors-heading">Independent note snapshots</h2>
-      <p class="hint">Loading replaces that slot's content. Clone a fetched snapshot to reproduce a stale save. Saving or changing sharing never refreshes another panel's ETag.</p>
-      <div id="editors" class="two-column"></div>
-    </section>
-
-    <section class="card" aria-labelledby="sharing-heading">
-      <h2 id="sharing-heading">Sharing <span class="optional">(owner only)</span></h2>
-      <form id="sharing-form" autocomplete="off">
-        <fieldset>
-          <legend class="visually-hidden">Sharing snapshot and replacement</legend>
-          <label for="sharing-id">Note ID</label>
-          <div class="fields">
-            <input id="sharing-id" type="text" class="field wide" spellcheck="false" autocapitalize="none">
-            <button type="submit">Get sharing</button>
-          </div>
-          <p id="sharing-snapshot" class="metadata">No sharing snapshot loaded.</p>
-          <p>Fetched ETag: <output id="sharing-etag" class="tag">Not loaded</output></p>
-          <div data-preconditions></div>
-          <div class="grant-builder">
-            <h3>Grant helper <span class="optional">(changes the draft only)</span></h3>
-            <div class="fields">
-              <div class="field">
-                <label for="grant-audience">Audience</label>
-                <select id="grant-audience"><option value="team">Team</option><option value="organization">Organization</option></select>
-              </div>
-              <div class="field wide">
-                <label for="grant-team">Team</label>
-                <select id="grant-team" disabled><option value="">Get teams first</option></select>
-              </div>
-              <div class="field">
-                <label for="grant-permission">Permission</label>
-                <select id="grant-permission"><option value="read">Read</option><option value="edit">Edit (includes read)</option></select>
-              </div>
-            </div>
-            <div class="actions">
-              <button id="add-grant" type="button" class="secondary">Add / replace this grant in draft</button>
-              <button id="empty-grants" type="button" class="secondary">Set draft to empty grants</button>
-            </div>
-          </div>
-          <label for="sharing-json">Replacement JSON</label>
-          <textarea id="sharing-json" rows="9" spellcheck="false" aria-describedby="sharing-help">{
-  "grants": []
-}</textarea>
-          <p id="sharing-help" class="hint">Replace sends this entire JSON value, including manually added invalid fields, to the API. Empty grants make the note private. Get sharing first, or select a manual/omitted If-Match to test rejected requests without a sharing snapshot.</p>
-          <button id="replace-sharing" type="button" disabled>Replace all sharing</button>
-        </fieldset>
-        <p data-status class="status" role="status">No sharing requested.</p>
-      </form>
-    </section>
-
-    <section class="card" aria-labelledby="response-heading">
+    <details id="response-panel" class="card">
+      <summary>Response details <span id="response-summary" class="optional">Not sent</span></summary>
       <div class="section-heading">
-        <h2 id="response-heading">Last completed response</h2>
         <button id="clear-response" type="button" class="secondary">Clear inspector</button>
       </div>
       <p class="hint">Response data only: no request headers or credentials. Concurrent requests may finish out of order; each panel also shows its own result.</p>
@@ -186,31 +204,39 @@
         <dt>ETag</dt><dd id="response-etag">None</dd>
       </dl>
       <pre id="response-body" tabindex="0" aria-label="Response JSON or raw response text">No response.</pre>
-    </section>
+    </details>
   </main>
 
   <template id="editor-template">
     <form class="card editor" autocomplete="off">
       <fieldset>
         <legend data-heading></legend>
-        <label data-label="id">Note ID</label>
-        <div class="fields">
-          <input data-field="id" type="text" class="field wide" spellcheck="false" autocapitalize="none">
-          <button type="submit">Load note</button>
+        <p data-field="empty" class="hint">Open a note from the list or create a new one. You can also open one by ID below.</p>
+        <div data-field="content" hidden>
+          <label data-label="title">Title</label>
+          <input data-field="title" type="text">
+          <label data-label="body">Markdown body <span class="optional">(raw text)</span></label>
+          <textarea data-field="body" rows="10" spellcheck="false"></textarea>
+          <div class="actions mutations">
+            <button data-field="save" type="submit" disabled>Save note</button>
+            <button data-field="reload" type="button" class="secondary" disabled>Reload</button>
+            <button data-field="sharing" type="button" class="secondary" disabled>Sharing</button>
+            <button data-field="delete" type="button" class="danger" disabled>Delete (owner only)</button>
+          </div>
         </div>
-        <p data-field="metadata" class="metadata">No note snapshot loaded.</p>
-        <p>Fetched ETag: <output data-field="etag" class="tag">Not loaded</output></p>
-        <div data-preconditions></div>
-        <label data-label="title">Title</label>
-        <input data-field="title" type="text">
-        <label data-label="body">Markdown body <span class="optional">(raw text)</span></label>
-        <textarea data-field="body" rows="10" spellcheck="false"></textarea>
-        <div class="actions mutations">
-          <button data-field="save" type="button" disabled>Save content</button>
+        <details data-field="options">
+          <summary>Open by ID, version, and request options</summary>
+          <label data-label="id">Note ID <span class="optional">(copy before switching users)</span></label>
+          <div class="fields">
+            <input data-field="id" type="text" class="field wide" spellcheck="false" autocapitalize="none">
+            <button data-field="load" type="submit">Load note</button>
+          </div>
+          <p data-field="metadata" class="metadata">No note snapshot loaded.</p>
+          <p>Fetched ETag: <output data-field="etag" class="tag">Not loaded</output></p>
+          <div data-preconditions></div>
           <button data-field="clone" type="button" class="secondary" disabled></button>
-          <button data-field="delete" type="button" class="danger" disabled>Delete (owner only)</button>
-        </div>
-        <p class="hint">Save and delete target the loaded snapshot's ID. Changing the ID requires a new load. Delete asks for confirmation; server authorization decides every action.</p>
+          <p class="hint">Changing the ID requires a new load. Loading replaces this editor's content. Save and delete use this snapshot's ETag unless explicitly overridden.</p>
+        </details>
       </fieldset>
       <p data-status class="status" role="status">No note loaded.</p>
     </form>
