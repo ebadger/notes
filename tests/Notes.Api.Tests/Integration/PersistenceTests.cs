@@ -170,6 +170,39 @@ public sealed class PersistenceTests(PostgreSqlFixture fixture) : ApiTestBase(fi
         Assert.Equal(4, count);
     }
 
+    [Fact]
+    public async Task Valid_configured_key_swaps_preserve_user_identity_and_note_ownership()
+    {
+        var aliceNote = await CreateNoteAsync(Alice);
+        var bobNote = await CreateNoteAsync(Bob);
+        var oldAliceKey = Fixture.ApiKey(TestUser.Alice);
+        var oldBobKey = Fixture.ApiKey(TestUser.Bob);
+        var identities = await IdentityRowsAsync();
+        try
+        {
+            await Fixture.RestartAsync(new Dictionary<TestUser, string>
+            {
+                [TestUser.Alice] = oldBobKey,
+                [TestUser.Bob] = oldAliceKey
+            });
+            Assert.Equal(aliceNote, await GetNoteAsync(Alice, aliceNote.Note.Id));
+            Assert.Equal(bobNote, await GetNoteAsync(Bob, bobNote.Note.Id));
+            Assert.Equal(identities, await IdentityRowsAsync());
+            Assert.Equal(ApiKeys.Hash(oldBobKey), await UserHashAsync(aliceNote.Note.OwnerId));
+            Assert.Equal(ApiKeys.Hash(oldAliceKey), await UserHashAsync(bobNote.Note.OwnerId));
+            using var denied = await Bob.GetAsync($"/api/notes/{aliceNote.Note.Id}");
+            await AssertProblemAsync(denied, HttpStatusCode.NotFound, noVersion: true);
+        }
+        finally
+        {
+            await Fixture.RestartAsync(new Dictionary<TestUser, string>
+            {
+                [TestUser.Alice] = oldAliceKey,
+                [TestUser.Bob] = oldBobKey
+            });
+        }
+    }
+
     private async Task<long> CountAsync(string table, string? column = null, Guid? value = null)
     {
         await using var connection = await Fixture.OpenConnectionAsync();
