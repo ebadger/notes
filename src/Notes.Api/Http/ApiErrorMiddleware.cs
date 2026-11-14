@@ -24,17 +24,17 @@ public sealed class ApiErrorMiddleware(RequestDelegate next, ILogger<ApiErrorMid
         {
             if (isApi)
             {
-                if (context.Request.ContentLength > InputValidation.MaxRequestBytes)
-                {
-                    await ApiProblems.WriteAsync(context, StatusCodes.Status413PayloadTooLarge,
-                        "Request body must not exceed 1 MiB.");
-                    return;
-                }
-
                 var sizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
                 if (sizeFeature is { IsReadOnly: false })
                 {
-                    sizeFeature.MaxRequestBodySize = InputValidation.MaxRequestBytes;
+                    // Kestrel counts chunk framing; BoundedReadStream limits decoded body bytes instead.
+                    sizeFeature.MaxRequestBodySize = null;
+                }
+
+                if (context.Request.ContentLength > InputValidation.MaxRequestBytes)
+                {
+                    await RejectOversizedRequestAsync(context);
+                    return;
                 }
 
                 context.Request.Body = new BoundedReadStream(originalBody, InputValidation.MaxRequestBytes);
@@ -45,13 +45,17 @@ public sealed class ApiErrorMiddleware(RequestDelegate next, ILogger<ApiErrorMid
         catch (BadHttpRequestException exception) when (!context.Response.HasStarted)
         {
             context.Response.Clear();
-            var detail = exception.StatusCode switch
+            if (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)
             {
-                StatusCodes.Status413PayloadTooLarge => "Request body must not exceed 1 MiB.",
-                StatusCodes.Status415UnsupportedMediaType => "Content-Type must be application/json.",
-                _ => "The request is malformed or contains invalid fields."
-            };
-            await ApiProblems.WriteAsync(context, exception.StatusCode, detail);
+                await RejectOversizedRequestAsync(context);
+            }
+            else
+            {
+                var detail = exception.StatusCode == StatusCodes.Status415UnsupportedMediaType
+                    ? "Content-Type must be application/json."
+                    : "The request is malformed or contains invalid fields.";
+                await ApiProblems.WriteAsync(context, exception.StatusCode, detail);
+            }
         }
         catch (JsonException) when (!context.Response.HasStarted)
         {
@@ -79,5 +83,17 @@ public sealed class ApiErrorMiddleware(RequestDelegate next, ILogger<ApiErrorMid
         {
             context.Request.Body = originalBody;
         }
+    }
+
+    private static Task RejectOversizedRequestAsync(HttpContext context)
+    {
+        if (HttpProtocol.IsHttp10(context.Request.Protocol) || HttpProtocol.IsHttp11(context.Request.Protocol))
+        {
+            // The unread oversized body must not leave a reusable HTTP/1 connection.
+            context.Response.Headers.Connection = "close";
+        }
+
+        return ApiProblems.WriteAsync(context, StatusCodes.Status413PayloadTooLarge,
+            "Request body must not exceed 1 MiB.");
     }
 }
