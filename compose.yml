@@ -1,0 +1,70 @@
+name: notes-service
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: notes
+      POSTGRES_USER: notes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run bash scripts/configure-demo.sh first}
+    volumes:
+      - notes-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notes -d notes"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: runtime
+      args:
+        NUGET_SOURCE: ${NUGET_SOURCE:-https://api.nuget.org/v3/index.json}
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Notes: Host=db;Database=notes;Username=notes;Password=${POSTGRES_PASSWORD}
+      Demo__ApiKeys__Alice: ${DEMO_ALICE_KEY:?Configure DEMO_ALICE_KEY in .env}
+      Demo__ApiKeys__Bob: ${DEMO_BOB_KEY:?Configure DEMO_BOB_KEY in .env}
+      Demo__ApiKeys__Carol: ${DEMO_CAROL_KEY:?Configure DEMO_CAROL_KEY in .env}
+      Demo__ApiKeys__Dana: ${DEMO_DANA_KEY:?Configure DEMO_DANA_KEY in .env}
+    ports:
+      - "127.0.0.1:${NOTES_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  test-db:
+    image: postgres:17
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: notes_test
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${NOTES_TEST_PORT:-15432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notes_test -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: tests
+      args:
+        NUGET_SOURCE: ${NUGET_SOURCE:-https://api.nuget.org/v3/index.json}
+    environment:
+      NOTES_TEST_DB: Host=test-db;Database=postgres;Username=notes_test;Password=${POSTGRES_PASSWORD}
+    depends_on:
+      test-db:
+        condition: service_healthy
+
+volumes:
+  notes-data:
