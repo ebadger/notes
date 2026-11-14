@@ -1,8 +1,11 @@
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
@@ -148,14 +151,22 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
     {
         factory = new NotesApplicationFactory(ConnectionString, keys);
         factory.UseKestrel(0);
+        factory.StartServer();
+        var server = factory.Services.GetRequiredService<IServer>();
+        var addresses = server.Features.Get<IServerAddressesFeature>();
+        Assert.NotNull(addresses);
+        var baseAddress = new Uri(Assert.Single(addresses.Addresses));
+        Assert.True(baseAddress.IsLoopback);
         anonymousClient = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
+            BaseAddress = baseAddress,
             AllowAutoRedirect = false
         });
         foreach (var user in Enum.GetValues<TestUser>())
         {
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions
             {
+                BaseAddress = baseAddress,
                 AllowAutoRedirect = false
             });
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", keys[user]);
