@@ -1,7 +1,9 @@
 # Automated tests
 
 The unit suite calls the service's actual validation, access-policy, API-key,
-and version-tag helpers. It does not start the application or need PostgreSQL.
+and version-tag helpers. It also exercises the real demo-key endpoint through
+an isolated ASP.NET Core TestServer with synthetic keys. It does not start the
+database-backed application or need PostgreSQL.
 
 ```powershell
 dotnet test tests\Notes.Api.Tests\Notes.Api.Tests.csproj --filter Category=Unit
@@ -51,6 +53,7 @@ revocation; no arbitrary timing sleep stands in for the required ordering.
 | Area | Checks |
 | --- | --- |
 | Authentication | All API routes require bearer keys; malformed/unknown credentials and identity-header/query-string bypasses fail; health is anonymous. |
+| Local demo access | Off by default; explicit opt-in; exact browser headers; loopback host and matching-origin restrictions; four configured keys only; no database credentials; no-store responses; invalid key configuration fails before serving. |
 | Authorization | Private direct/list nondisclosure, owner operations, team editors, organization readers, multiple-team strongest access and deduplication, no-membership organization access, revocation. |
 | Content | Required string fields, trimming, exact UTF-16 title and decoded UTF-8 body boundaries, empty body, unknown fields, immutable ownership/grants, UTC timestamps. |
 | Sharing | Defined enums, required/forbidden team IDs, unknown teams, duplicate targets, complete replacement, atomic failure, shared version increments. |

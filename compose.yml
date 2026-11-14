@@ -29,6 +29,7 @@ services:
       Demo__ApiKeys__Bob: ${DEMO_BOB_KEY:?Configure DEMO_BOB_KEY in .env}
       Demo__ApiKeys__Carol: ${DEMO_CAROL_KEY:?Configure DEMO_CAROL_KEY in .env}
       Demo__ApiKeys__Dana: ${DEMO_DANA_KEY:?Configure DEMO_DANA_KEY in .env}
+      Demo__EnableBrowserKeys: ${DEMO_BROWSER_KEYS:-false}
     ports:
       - "127.0.0.1:${NOTES_PORT:-8080}:8080"
     depends_on:
