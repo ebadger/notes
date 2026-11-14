@@ -10,6 +10,7 @@
   const scopes = [];
   const slots = [];
   let identityGeneration = 0;
+  let loadingDemoKeys = false;
   let page = null;
   let teams = [];
 
@@ -42,25 +43,38 @@
     const fragment = byId("editor-template").content.cloneNode(true);
     const form = fragment.querySelector("form");
     form.id = `editor-${name.toLowerCase()}`;
-    form.querySelector("[data-heading]").textContent = `Editor ${name}`;
+    form.querySelector("[data-heading]").textContent = name === "A" ? "Note" : "Second snapshot (B)";
     addPreconditions(form, form.id);
-    byId("editors").append(fragment);
+    byId(name === "A" ? "primary-editor" : "secondary-editor").append(fragment);
     const slot = makeScope(form);
     slot.name = name;
     slots.push(slot);
-    field(slot, "clone").textContent = `Clone snapshot to ${name === "A" ? "B" : "A"}`;
+    field(slot, "clone").textContent = name === "A" ? "Keep a second snapshot" : "Copy snapshot to main editor";
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      void loadNote(slot);
+      if (event.submitter === field(slot, "load")) void loadNote(slot);
+      else void saveNote(slot);
     });
     field(slot, "id").addEventListener("input", refreshControls);
-    field(slot, "save").addEventListener("click", () => void saveNote(slot));
+    field(slot, "id").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        field(slot, "load").click();
+      }
+    });
+    field(slot, "sharing").addEventListener("click", () => {
+      if (slot.snapshot) void loadSharing(slot.snapshot.id);
+    });
+    field(slot, "reload").addEventListener("click", () => {
+      if (slot.snapshot) void loadNote(slot, slot.snapshot.id);
+    });
     field(slot, "delete").addEventListener("click", () => void deleteNote(slot));
     field(slot, "clone").addEventListener("click", () => {
       const other = slots.find((candidate) => candidate !== slot);
       if (!slot.snapshot || other.busy || !mayReplaceNote(other)) return;
       setNoteSnapshot(other, slot.snapshot);
       showStatus(other, `Cloned ${slot.name}'s fetched snapshot, not its unsaved draft. No request sent.`, "success");
+      focusNote(other);
     });
   }
 
@@ -74,30 +88,40 @@
   }
 
   function refreshControls() {
+    identity.disabled = loadingDemoKeys;
+    keyInput.disabled = loadingDemoKeys;
+    byId("use-key").disabled = loadingDemoKeys;
+    byId("load-demo-keys").disabled = loadingDemoKeys;
     for (const scope of [...slots, sharing]) {
       field(scope, "match-value").disabled = field(scope, "match-mode").value !== "manual";
     }
     for (const slot of slots) {
       const loaded = matchingSnapshot(slot, field(slot, "id").value.trim());
+      field(slot, "content").hidden = !slot.snapshot;
+      field(slot, "empty").hidden = !!slot.snapshot;
       field(slot, "save").disabled = !loaded;
+      field(slot, "reload").disabled = !loaded;
+      field(slot, "sharing").disabled = !loaded || sharing.busy;
       field(slot, "delete").disabled = !loaded;
       field(slot, "clone").disabled = !loaded || slots.some((other) => other !== slot && other.busy);
     }
     byId("open-created").disabled = !creation.snapshot || slots[0].busy;
+    byId("created-result").hidden = !creation.snapshot;
+    byId("new-note").disabled = creation.busy;
+    byId("clone-selected").disabled = field(slots[0], "clone").disabled || slots[0].busy;
+    byId("load-selected-sharing").disabled = !slots[0].snapshot || sharing.busy;
+    byId("demo-sharing").disabled = sharing.busy || discovery.busy;
     byId("previous-page").disabled = listing.busy || !page || page.offset === 0;
     byId("next-page").disabled = listing.busy || !page || page.nextOffset === null;
     byId("grant-team").disabled = byId("grant-audience").value !== "team" || teams.length === 0;
     byId("replace-sharing").disabled = !byId("sharing-id").value.trim()
       || (field(sharing, "match-mode").value === "snapshot"
         && !matchingSnapshot(sharing, byId("sharing-id").value.trim()));
-    for (const button of byId("note-list").querySelectorAll("[data-target]")) {
-      button.disabled = button.dataset.target === "sharing"
-        ? sharing.busy
-        : slots[Number(button.dataset.target)].busy;
-    }
+    for (const button of byId("note-list").querySelectorAll("button")) button.disabled = slots[0].busy;
   }
 
   function clearInspector() {
+    byId("response-summary").textContent = "Not sent";
     byId("response-request").textContent = "None";
     byId("response-status").textContent = "Not sent";
     byId("response-etag").textContent = "None";
@@ -107,6 +131,7 @@
   function resetResources(message) {
     const hadRequests = controllers.size > 0;
     identityGeneration += 1;
+    loadingDemoKeys = false;
     for (const controller of controllers) controller.abort();
     controllers.clear();
     page = null;
@@ -117,20 +142,25 @@
       scope.form.reset();
       scope.form.querySelector("fieldset").disabled = false;
       scope.form.removeAttribute("aria-busy");
-      showStatus(scope, "Cleared. Send a new request for this identity.");
+      showStatus(scope, "");
     }
     for (const slot of slots) {
       field(slot, "metadata").textContent = "No note snapshot loaded.";
       field(slot, "etag").textContent = "Not loaded";
+      field(slot, "options").open = false;
     }
-    byId("sharing-snapshot").textContent = "No sharing snapshot loaded.";
-    byId("sharing-etag").textContent = "Not loaded";
+    clearSharingSnapshot();
     byId("note-list").replaceChildren();
     byId("team-list").replaceChildren();
     byId("list-page").textContent = "";
     byId("grant-team").replaceChildren(new Option("Get teams first", ""));
+    for (const id of ["create-panel", "sharing-panel", "advanced-tests", "response-panel"]) byId(id).open = false;
     clearInspector();
+    for (const option of identity.options) {
+      option.textContent = `${option.value}${keys.get(option.value)?.trim() ? " - key loaded" : ""}`;
+    }
     refreshControls();
+    byId("identity-status").dataset.state = "";
     byId("identity-status").textContent = message
       + (hadRequests ? " In-flight requests were canceled locally; a write may already have reached the service. Reload the resource to check." : "");
   }
@@ -139,21 +169,105 @@
     keys.clear();
     keyInput.value = "";
     resetResources("All keys and results forgotten. Requests will be unauthenticated.");
+    byId("manual-key").open = true;
   }
 
   identity.addEventListener("change", () => {
     keyInput.value = keys.get(identity.value) ?? "";
     resetResources(`Switched to the ${identity.value} label. ${keyInput.value.trim() ? "Its in-memory key is selected." : "No key configured; requests will be unauthenticated."}`);
+    if (keyInput.value.trim()) refreshData();
   });
-  keyInput.addEventListener("input", () => {
+  function keyChanged() {
+    if ((keys.get(identity.value) ?? "") === keyInput.value) return;
     keys.set(identity.value, keyInput.value);
     resetResources(keyInput.value.trim()
       ? `Key changed for the ${identity.value} label. Results cleared; the server will determine identity.`
       : "Key cleared. Results cleared; requests will be unauthenticated.");
+  }
+  keyInput.addEventListener("input", keyChanged);
+  keyInput.addEventListener("change", keyChanged);
+  byId("use-key").addEventListener("click", () => {
+    keyChanged();
+    refreshData();
   });
   byId("forget-keys").addEventListener("click", forgetKeys);
   byId("clear-response").addEventListener("click", clearInspector);
   window.addEventListener("pagehide", forgetKeys);
+
+  function readDemoKeys(data) {
+    const loaded = new Map();
+    for (const name of ["Alice", "Bob", "Carol", "Dana"]) {
+      const value = data?.keys?.[name];
+      if (typeof value !== "string" || value.length < 32 || /\s/.test(value)) {
+        throw new UserVisibleError("The service returned an invalid demo-key configuration. No keys were loaded.");
+      }
+      try {
+        new Headers({ Authorization: `Bearer ${value}` });
+      } catch {
+        throw new UserVisibleError("The service returned an unusable demo key. No keys were loaded.");
+      }
+      loaded.set(name, value);
+    }
+    if (new Set(loaded.values()).size !== 4) throw new UserVisibleError("The service must configure four different demo keys. No keys were loaded.");
+    return loaded;
+  }
+
+  async function loadDemoKeys() {
+    if (loadingDemoKeys) return;
+    keys.clear();
+    keyInput.value = "";
+    resetResources("Loading demo users...");
+    const generation = identityGeneration;
+    const controller = new AbortController();
+    controllers.add(controller);
+    loadingDemoKeys = true;
+    refreshControls();
+    byId("identity-status").dataset.state = "pending";
+    let loaded;
+    try {
+      const response = await fetch("/demo/keys", {
+        headers: { Accept: "application/json", "X-Notes-Demo": "true" },
+        signal: controller.signal,
+        credentials: "omit",
+        mode: "same-origin",
+        redirect: "error",
+        cache: "no-store",
+        referrerPolicy: "no-referrer",
+      });
+      if (response.status === 404) {
+        throw new UserVisibleError("Automatic demo access is disabled on this service. Use a manual API key below.");
+      }
+      if (response.status !== 200) throw new UserVisibleError(`Demo users could not be loaded (HTTP ${response.status}). Check the local demo configuration or use a manual key.`);
+      loaded = readDemoKeys(await response.json());
+    } catch (error) {
+      if (generation !== identityGeneration) return;
+      byId("identity-status").dataset.state = "error";
+      byId("identity-status").textContent = error instanceof UserVisibleError
+        ? error.message
+        : "Could not load demo users. Check the local service or use a manual API key below.";
+      byId("manual-key").open = true;
+      return;
+    } finally {
+      controllers.delete(controller);
+      if (generation === identityGeneration) {
+        loadingDemoKeys = false;
+        refreshControls();
+      }
+    }
+    if (generation !== identityGeneration) return;
+    for (const [name, value] of loaded) keys.set(name, value);
+    keyInput.value = keys.get(identity.value);
+    resetResources("Demo users are ready. Choose Alice, Bob, Carol, or Dana to see their notes.");
+    byId("manual-key").open = false;
+    refreshData();
+  }
+
+  byId("load-demo-keys").addEventListener("click", () => void loadDemoKeys());
+
+  function refreshData() {
+    void loadPage(Number(byId("list-limit").value), Number(byId("list-offset").value));
+    void loadTeams();
+  }
 
   async function run(scope, pendingMessage, operation) {
     if (scope.busy) return;
@@ -181,6 +295,11 @@
   }
 
   async function request(generation, path, { method = "GET", body, etag } = {}) {
+    // Password managers may change a field without firing an input/change event.
+    if (keyInput.value !== (keys.get(identity.value) ?? "")) {
+      keyChanged();
+      return null;
+    }
     const controller = new AbortController();
     controllers.add(controller);
     let response;
@@ -207,6 +326,7 @@
       if (generation !== identityGeneration) return null;
       byId("response-request").textContent = `${method} ${path}`;
       byId("response-status").textContent = "Request could not be completed";
+      byId("response-summary").textContent = "Request failed";
       byId("response-etag").textContent = "Unknown";
       byId("response-body").textContent = "No complete response was received. Check the local service and connection. Redirects are deliberately refused. No automatic retry was made; a write may already have reached the service.";
       throw new UserVisibleError("Request could not be completed. Check the response inspector. Reload the resource before retrying a write.");
@@ -225,6 +345,7 @@
     const result = { ok: response.ok, status: response.status, statusText: response.statusText, etag: response.headers.get("ETag"), data };
     byId("response-request").textContent = `${method} ${path}`;
     byId("response-status").textContent = `HTTP ${response.status} ${response.statusText}`.trim();
+    byId("response-summary").textContent = `HTTP ${response.status}`;
     byId("response-etag").textContent = result.etag ?? "None";
     byId("response-body").textContent = text
       ? (data === undefined ? text : JSON.stringify(data, null, 2))
@@ -304,6 +425,11 @@
     refreshControls();
   }
 
+  function focusNote(slot) {
+    if (slot.name === "B") byId("advanced-tests").open = true;
+    field(slot, "title").focus();
+  }
+
   async function loadNote(slot, requestedId = field(slot, "id").value.trim()) {
     if (slot.busy || !mayReplaceNote(slot)) return;
     await run(slot, "Loading note...", async (generation) => {
@@ -311,6 +437,7 @@
       if (!success(slot, result, 200, validNote)) return;
       setNoteSnapshot(slot, result);
       showStatus(slot, `HTTP 200. Loaded version ${result.data.version}.`, "success");
+      focusNote(slot);
     });
   }
 
@@ -361,24 +488,18 @@
       const title = addCell(row, note.title);
       const id = document.createElement("span");
       id.className = "note-id";
-      id.textContent = note.id;
+      id.textContent = `Version ${note.version ?? "not included"}`;
       title.append(id);
-      addCell(row, `${note.ownerId} / ${note.version ?? "version not included"}`);
       const actions = document.createElement("div");
       actions.className = "actions";
-      for (const target of ["0", "1", "sharing"]) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "secondary";
-        button.dataset.target = target;
-        button.textContent = target === "sharing" ? "Sharing" : `Editor ${slots[Number(target)].name}`;
-        button.setAttribute("aria-label", `${button.textContent}: ${note.title}`);
-        button.addEventListener("click", () => {
-          if (target === "sharing") void loadSharing(note.id);
-          else void loadNote(slots[Number(target)], note.id);
-        });
-        actions.append(button);
-      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary";
+      button.dataset.target = "0";
+      button.textContent = "Open";
+      button.setAttribute("aria-label", `Open: ${note.title}`);
+      button.addEventListener("click", () => void loadNote(slots[0], note.id));
+      actions.append(button);
       addCell(row, "").append(actions);
       body.append(row);
     }
@@ -405,7 +526,7 @@
 
   listing.form.addEventListener("submit", (event) => {
     event.preventDefault();
-    void loadPage(Number(byId("list-limit").value), Number(byId("list-offset").value));
+    refreshData();
   });
   byId("previous-page").addEventListener("click", () => {
     if (page) void loadPage(page.limit, Math.max(0, page.offset - page.limit));
@@ -413,6 +534,11 @@
   byId("next-page").addEventListener("click", () => {
     if (page?.nextOffset !== null && page) void loadPage(page.limit, page.nextOffset);
   });
+  byId("new-note").addEventListener("click", () => {
+    byId("create-panel").open = true;
+    byId("create-title").focus();
+  });
+  byId("clone-selected").addEventListener("click", () => field(slots[0], "clone").click());
 
   creation.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -424,18 +550,21 @@
       if (!success(creation, result, 201, validNote)) return;
       creation.snapshot = result;
       byId("created-id").value = result.data.id;
-      showStatus(creation, "HTTP 201. Private note created. Copy its ID or open its fetched snapshot in A.", "success");
+      showStatus(creation, "HTTP 201. Private note created.", "success");
+      openCreatedNote();
     });
   });
-  byId("open-created").addEventListener("click", () => {
+  function openCreatedNote() {
     if (!creation.snapshot || slots[0].busy || !mayReplaceNote(slots[0])) return;
     setNoteSnapshot(slots[0], creation.snapshot);
     showStatus(slots[0], "Opened the creation response snapshot. No additional request sent.", "success");
-  });
+    byId("create-panel").open = false;
+    focusNote(slots[0]);
+  }
+  byId("open-created").addEventListener("click", openCreatedNote);
 
-  discovery.form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void run(discovery, "Loading teams...", async (generation) => {
+  async function loadTeams() {
+    await run(discovery, "Loading teams...", async (generation) => {
       const result = await request(generation, "/api/teams");
       const valid = ({ data }) => data && Array.isArray(data.items)
         && data.items.every((team) => team && typeof team.id === "string" && typeof team.name === "string")
@@ -450,8 +579,13 @@
         byId("team-list").append(item);
         byId("grant-team").append(new Option(`${team.name} (${team.id})`, team.id));
       }
+      if (sharing.snapshot) renderSharingSummary();
       showStatus(discovery, `HTTP 200. ${teams.length} team(s) discovered.`, "success");
     });
+  }
+  discovery.form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void loadTeams();
   });
 
   function validSharing(result) {
@@ -466,18 +600,31 @@
   function setSharingSnapshot(id, result) {
     sharing.snapshot = { id, data: result.data, etag: result.etag };
     byId("sharing-id").value = id;
-    byId("sharing-json").value = JSON.stringify(result.data, null, 2);
+    setSharingDraft(result.data);
     byId("sharing-snapshot").textContent = `Loaded sharing for ID: ${id}`;
     byId("sharing-etag").textContent = result.etag;
     resetPreconditions(sharing);
     refreshControls();
   }
 
+  function clearSharingSnapshot() {
+    sharing.snapshot = null;
+    byId("sharing-json").value = JSON.stringify({ grants: [] }, null, 2);
+    byId("sharing-snapshot").textContent = "No sharing snapshot loaded.";
+    byId("sharing-etag").textContent = "Not loaded";
+    byId("sharing-summary").replaceChildren(textItem("Load sharing to see current access."));
+    resetPreconditions(sharing);
+  }
+
   async function loadSharing(id = byId("sharing-id").value.trim()) {
     if (sharing.busy) return;
+    byId("sharing-panel").open = true;
     const original = JSON.stringify(sharing.snapshot?.data ?? { grants: [] }, null, 2);
     if (byId("sharing-json").value !== original
       && !window.confirm("Replace the sharing draft with a fresh server snapshot? Preserve any changes you want to reconcile first.")) return;
+    if (!matchingSnapshot(sharing, id)) clearSharingSnapshot();
+    byId("sharing-id").value = id;
+    refreshControls();
     await run(sharing, "Loading owner-only sharing...", async (generation) => {
       const result = await request(generation, `${notePath(id)}/sharing`);
       if (!success(sharing, result, 200, validSharing)) return;
@@ -494,6 +641,65 @@
       throw new UserVisibleError("Sharing draft is not valid JSON. Fix its syntax first; no request was sent.");
     }
   }
+
+  function textItem(text) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    return item;
+  }
+
+  function renderSharingSummary() {
+    const list = byId("sharing-summary");
+    list.replaceChildren();
+    let draft;
+    try {
+      draft = sharingDraft();
+    } catch (error) {
+      if (!(error instanceof UserVisibleError)) throw error;
+      list.append(textItem("Invalid JSON draft. Open custom permissions to fix it."));
+      return;
+    }
+    if (!Array.isArray(draft?.grants)) {
+      list.append(textItem("The draft needs a grants array. Open custom permissions to fix it."));
+      return;
+    }
+    if (!draft.grants.length) list.append(textItem("Private: only the owner has access."));
+    for (const grant of draft.grants) {
+      if (!grant || !["team", "organization"].includes(grant.audience) || !["read", "edit"].includes(grant.permission)) {
+        list.append(textItem("Invalid grant. Open custom permissions to fix it."));
+        continue;
+      }
+      const audience = grant.audience === "organization"
+        ? "Organization"
+        : teams.find((team) => team.id === grant.teamId)?.name ?? grant.teamId ?? "Missing team";
+      list.append(textItem(`${audience}: ${grant.permission === "edit" ? "can edit and read" : "can read"}`));
+    }
+  }
+
+  function setSharingDraft(draft) {
+    byId("sharing-json").value = JSON.stringify(draft, null, 2);
+    renderSharingSummary();
+  }
+
+  byId("sharing-json").addEventListener("input", renderSharingSummary);
+  byId("load-selected-sharing").addEventListener("click", () => {
+    if (slots[0].snapshot) void loadSharing(slots[0].snapshot.id);
+  });
+  byId("demo-sharing").addEventListener("click", async () => {
+    const generation = identityGeneration;
+    if (!teams.length) await loadTeams();
+    if (generation !== identityGeneration) return;
+    const team = teams.find((candidate) => candidate.name === "Team A");
+    if (!team) {
+      showStatus(sharing, "Team A was not returned by team discovery. Check the team response before choosing this preset.", "error");
+      return;
+    }
+    setSharingDraft({ grants: [
+      { audience: "team", teamId: team.id, permission: "edit" },
+      { audience: "organization", permission: "read" },
+    ] });
+    showStatus(sharing, "Demo permissions are ready in the draft. Save sharing to apply them.");
+  });
 
   sharing.form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -515,15 +721,15 @@
       draft.grants = draft.grants.filter((existing) => !existing || existing.audience !== audience
         || (audience === "team" && existing.teamId !== teamId));
       draft.grants.push(grant);
-      byId("sharing-json").value = JSON.stringify(draft, null, 2);
-      showStatus(sharing, "Draft changed only. Replace all sharing to send it to the service.");
+      setSharingDraft(draft);
+      showStatus(sharing, "Draft changed only. Save sharing to send it to the service.");
     } catch (error) {
       showStatus(sharing, error instanceof UserVisibleError ? error.message : "Could not update the sharing draft. No request was sent.", "error");
     }
   });
   byId("empty-grants").addEventListener("click", () => {
-    byId("sharing-json").value = JSON.stringify({ grants: [] }, null, 2);
-    showStatus(sharing, "Draft contains no grants. Replace all sharing to make the note private.");
+    setSharingDraft({ grants: [] });
+    showStatus(sharing, "Draft contains no grants. Save sharing to make the note private.");
   });
   byId("replace-sharing").addEventListener("click", () => {
     void run(sharing, "Replacing all sharing...", async (generation) => {
@@ -540,5 +746,5 @@
   });
 
   keyInput.value = "";
-  resetResources("No key configured. Requests will be unauthenticated.");
+  void loadDemoKeys();
 })();

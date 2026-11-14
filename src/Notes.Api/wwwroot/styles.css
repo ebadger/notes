@@ -7,17 +7,16 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; }
-.page-header, main { width: min(1440px, 100%); margin: auto; padding: 1.5rem; }
+.page-header, main { width: min(1050px, 100%); margin: auto; padding: 1.25rem; }
 .page-header { padding-bottom: .25rem; }
-h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); letter-spacing: -.035em; margin: .2rem 0; }
+h1 { font-size: 2rem; letter-spacing: -.035em; margin: .2rem 0; }
 h2 { font-size: 1.25rem; margin: 0 0 .9rem; }
 h3 { font-size: 1rem; margin: 0 0 .5rem; }
 p { margin: .6rem 0; }
-main > section, main > details, main > .two-column { margin-bottom: 1.4rem; }
-.eyebrow { color: #52637b; font-size: .8rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+main > section, main > details, main > div { margin-bottom: 1rem; }
 .card { background: #fff; border: 1px solid #cdd7e4; border-radius: .65rem; padding: 1.25rem; min-width: 0; }
-.two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; }
 .fields, .actions, .section-heading { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
 .fields { margin-bottom: .65rem; }
 .field { flex: 1 1 10rem; min-width: 0; }
@@ -53,7 +52,13 @@ a { color: #1456a2; text-underline-offset: .2em; }
 .status[data-state="pending"] { color: #254e85; }
 .precondition, .grant-builder { background: #f7f9fc; padding: .7rem; border-radius: .35rem; margin: .8rem 0; }
 .mutations { margin-top: .85rem; }
-.instructions summary { font-weight: 650; cursor: pointer; }
+details { margin-top: .8rem; }
+summary { font-weight: 650; cursor: pointer; }
+details[open] > summary { margin-bottom: .8rem; }
+.card > summary { font-size: 1.05rem; }
+.draft-heading { margin-top: 1rem; }
+.grant-summary { padding-left: 1.25rem; }
+#secondary-editor { margin-top: 1rem; }
 .instructions li { margin: .6rem 0; }
 .instructions ol { padding-left: 1.5rem; }
 .table-scroll { overflow-x: auto; }
@@ -61,7 +66,7 @@ table { width: 100%; border-collapse: collapse; font-size: .9rem; text-align: le
 th, td { padding: .65rem .5rem; border-bottom: 1px solid #dee5ee; vertical-align: top; }
 td { overflow-wrap: anywhere; }
 td:first-child { max-width: 26rem; }
-td .actions { min-width: 12rem; gap: .4rem; }
+td .actions { min-width: 4rem; gap: .4rem; }
 td button { padding: .3rem .55rem; font-size: .85rem; }
 .note-id { display: block; color: #52637b; font-family: ui-monospace, Consolas, monospace; font-size: .8rem; margin-top: .2rem; }
 .team-list { padding-left: 1.2rem; overflow-wrap: anywhere; }
@@ -76,7 +81,6 @@ pre { padding: 1rem; background: #f4f7fb; border: 1px solid #d5dfeb; border-radi
 noscript { display: block; color: #982730; margin-bottom: 1rem; }
 
 @media (max-width: 850px) {
-  .two-column { grid-template-columns: 1fr; }
   .page-header, main { padding: 1rem; }
   .card { padding: 1rem; }
 }

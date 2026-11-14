@@ -83,6 +83,7 @@ app.MapGet("/health", async (NotesDbContext database, CancellationToken cancella
         : Results.Json(new { status = "unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable))
     .AllowAnonymous();
 app.MapNotesApi();
+app.MapDemoApi();
 
 await app.RunAsync();
 

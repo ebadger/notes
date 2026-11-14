@@ -45,7 +45,8 @@ public static class DatabaseInitializer
         IConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
-        var desiredHashes = ReadConfiguredHashes(configuration);
+        var configuredKeys = ReadConfiguredKeys(configuration);
+        var desiredHashes = Users.ToDictionary(user => user.Id, user => ApiKeys.Hash(configuredKeys[user.Name]));
         if (configuration.GetValue("Database:ApplyMigrations", true))
         {
             await database.Database.MigrateAsync(cancellationToken);
@@ -115,11 +116,11 @@ public static class DatabaseInitializer
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private static Dictionary<Guid, string> ReadConfiguredHashes(IConfiguration configuration)
+    public static IReadOnlyDictionary<string, string> ReadConfiguredKeys(IConfiguration configuration)
     {
-        var hashes = new Dictionary<Guid, string>();
+        var keys = new Dictionary<string, string>(StringComparer.Ordinal);
         var uniqueHashes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (id, name) in Users)
+        foreach (var (_, name) in Users)
         {
             var key = configuration[$"Demo:ApiKeys:{name}"];
             if (!ApiKeys.HasValidFormat(key))
@@ -134,10 +135,10 @@ public static class DatabaseInitializer
                 throw new InvalidOperationException("Demo API keys must be unique for each user.");
             }
 
-            hashes.Add(id, hash);
+            keys.Add(name, key!);
         }
 
-        return hashes;
+        return keys;
     }
 
     private static void AddInitialNotes(NotesDbContext database)
