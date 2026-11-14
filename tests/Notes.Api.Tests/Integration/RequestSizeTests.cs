@@ -66,6 +66,8 @@ public sealed class RequestSizeTests(PostgreSqlFixture fixture) : ApiTestBase(fi
         if (expectedStatus == 413)
         {
             await AssertProblemAsync(response, HttpStatusCode.RequestEntityTooLarge);
+            Assert.True(response.Headers.ConnectionClose,
+                "HTTP/1.1 oversized requests must not leave an unread body on a reusable connection.");
             if (original is not null)
             {
                 Assert.Equal(original, await GetNoteAsync(Alice, original.Note.Id));

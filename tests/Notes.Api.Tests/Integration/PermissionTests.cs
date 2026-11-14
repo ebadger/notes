@@ -23,13 +23,26 @@ public sealed class PermissionTests(PostgreSqlFixture fixture) : ApiTestBase(fix
 
         foreach (var client in new[] { Bob, Carol, Dana })
         {
-            foreach (var id in new[] { created.Note.Id, Guid.NewGuid() })
+            foreach (var (method, suffix, content) in ResourceOperations())
             {
-                foreach (var (method, suffix, content) in ResourceOperations())
+                (string? Type, string? Title, string? Detail)? expectedProblem = null;
+                foreach (var id in new[] { created.Note.Id, Guid.NewGuid() })
                 {
                     using var response = await SendAsync(client, method, $"/api/notes/{id}{suffix}", content, "\"999\"");
                     await AssertProblemAsync(response, HttpStatusCode.NotFound, noVersion: true);
                     var error = await response.Content.ReadAsStringAsync();
+                    using var document = JsonDocument.Parse(error);
+                    var problem = document.RootElement;
+                    var normalized = (
+                        problem.GetProperty("type").GetString(),
+                        problem.GetProperty("title").GetString(),
+                        problem.TryGetProperty("detail", out var detail) ? detail.GetString() : null);
+                    if (expectedProblem is { } expected)
+                    {
+                        Assert.Equal(expected, normalized);
+                    }
+
+                    expectedProblem = normalized;
                     Assert.DoesNotContain(created.Note.Title, error);
                     Assert.DoesNotContain(created.Note.Body, error);
                     Assert.DoesNotContain(created.Note.OwnerId.ToString(), error);
