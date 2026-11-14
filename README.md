@@ -11,6 +11,46 @@ Keep this checkout on the distribution's **Linux filesystem**, such as
 `~/notes-service`, not under `/mnt/c`. Docker's data directory and the database
 volume must also be on the Linux filesystem.
 
+### One-step setup
+
+From a shell inside a WSL 2 distribution (Ubuntu by default), clone the
+repository and run the setup script as your regular user:
+
+```bash
+git clone https://github.com/ebadger/notes.git ~/notes-service
+cd ~/notes-service
+bash scripts/setup-wsl.sh
+```
+
+The script:
+
+1. Checks that it runs in WSL 2 from a checkout on the Linux filesystem.
+2. Installs Docker Engine, Compose V2, Buildx, curl, and OpenSSL from the Ubuntu
+   archive when they are missing, prompting for `sudo`, then starts Docker (with
+   systemd when it is enabled). If Docker Desktop's WSL integration is enabled,
+   it uses that instead of installing Docker Engine.
+3. Creates the private `.env` with `scripts/configure-demo.sh` unless one exists.
+4. Runs `docker compose up --build -d` and waits for `/health`, printing the API
+   log if startup fails.
+5. Prints the URLs, where to find the demo keys (including the `.env` path from
+   Windows), and day-to-day commands.
+
+Add `--run-tests` to also run the containerized test suite. The script is safe to
+rerun, for example after `git pull` or a WSL restart. It never prints
+credentials, deletes data, edits `/etc/wsl.conf`, or adds you to the `docker`
+group; if your account cannot use the Docker socket, it runs Docker with `sudo`.
+It will not generate a new `.env` while the database volume exists, because a
+new password would not match the existing database. One-click demo users in the
+web page (see [Manual validation](#manual-validation)) stay off unless you set
+`DEMO_BROWSER_KEYS=true` in `.env` and rerun the script.
+
+WSL stops a distribution, and therefore the service, shortly after its last
+terminal closes, so keep a WSL terminal open while you use it. On distributions
+other than Ubuntu, install Docker Engine with Compose V2 first, then run the
+script.
+
+### Manual setup
+
 Prerequisites: a working WSL 2 distribution, Docker Engine with Compose V2, and
 OpenSSL. The containers include the .NET SDK/runtime; a host SDK is unnecessary.
 On Ubuntu with these packages available:
@@ -33,11 +73,12 @@ docker compose up --build -d
 curl --fail http://localhost:8080/health
 ```
 
-The setup script generates five independent cryptographically random values in
-a private, Git-ignored `.env`: one database password and four demo bearer keys.
-It refuses to overwrite an existing file. Alternatively, copy `.env.example` to
-`.env` and fill in every required value. Do not commit this file, share its
-contents in logs, or bake it into an image; the Docker build excludes it.
+`scripts/configure-demo.sh` generates five independent cryptographically random
+values in a private, Git-ignored `.env`: one database password and four demo
+bearer keys. It refuses to overwrite an existing file. Alternatively, copy
+`.env.example` to `.env` and fill in every required value. Do not commit this
+file, share its contents in logs, or bake it into an image; the Docker build
+excludes it.
 
 Open **http://localhost:8080/** from the Windows host running WSL. The API is at
 `http://localhost:8080/api`. Compose publishes the service only on loopback; the
