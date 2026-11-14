@@ -5,6 +5,9 @@ A .NET 10 / ASP.NET Core REST service backed by PostgreSQL 17, implementing
 organization receive independent read or edit grants. A static manual test
 workbench is included; it is not a product frontend or Markdown renderer.
 
+See the [database schema diagrams](DATABASE_SCHEMA.md) for the implemented
+PostgreSQL tables, keys, relationships, constraints, and indexes.
+
 ## Run in WSL
 
 Keep this checkout on the distribution's **Linux filesystem**, such as

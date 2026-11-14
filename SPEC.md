@@ -89,6 +89,9 @@ List filtering must happen in PostgreSQL, before pagination. Do not load all not
 
 ## 6. Relational model
 
+For the implemented SQL schema, including column names and maintenance tables,
+see the [database schema diagrams](DATABASE_SCHEMA.md).
+
 Use UUID identifiers and UTC timestamps.
 
 | Entity | Essential fields and constraints |
