@@ -8,6 +8,39 @@ workbench is included; it is not a product frontend or Markdown renderer.
 See the [database schema diagrams](DATABASE_SCHEMA.md) for the implemented
 PostgreSQL tables, keys, relationships, constraints, and indexes.
 
+## Key design choices
+
+### 1. Database selection and scalability
+
+We chose PostgreSQL as the authoritative store for shared, durable state,
+accepting more setup than an embedded database. Transactions, database
+constraints, and SQL-enforced optimistic concurrency protect notes and grants
+without relying on one API process. Database-side access filtering,
+query-aligned indexes, bounded note pagination, and stateless API requests give
+a growth path, not evidence of measured throughput or production-ready
+horizontal scaling. Startup migrations and offset pagination remain deliberate
+demo tradeoffs.
+
+### 2. Flexibility and utility through ownership and sharing
+
+One note has an immutable individual owner and independent read/edit grants for
+teams and the organization. The strongest matching grant wins. This supports
+private use, team collaboration, and organization-wide reading without copying
+notes or introducing separate note types. Separating ownership from audience
+maximizes reuse while leaving sharing administration with the owner. Flexibility
+is concentrated in this access model, not unlimited product scope.
+
+### 3. Simple configuration and a deliberately narrow Markdown scope
+
+Docker Compose, environment-based configuration, generated private credentials,
+and seeded users and teams make local setup reproducible without building
+registration or production identity infrastructure. This keeps configuration
+small, not zero-cost: PostgreSQL and credentials still need setup. Note content
+is deliberately just a title plus Markdown text. The backend stores raw text;
+it does not parse or render Markdown or validate Markdown syntax. This avoids
+rich-text document models, attachments, format conversion, and rendering
+machinery while retaining useful, portable content.
+
 ## Run in WSL
 
 Keep this checkout on the distribution's **Linux filesystem**, such as
@@ -326,3 +359,18 @@ would require an explicit isolation migration, not another grant type.
 If NuGet is unavailable on your network, set `NUGET_SOURCE` in `.env` to the
 official Microsoft public mirror shown in `.env.example` and rebuild. Do not
 disable TLS verification to work around networking or certificate problems.
+
+## With more time
+
+The existing unit and integration tests focus on correctness. Further work,
+not yet delivered here, would prioritize:
+
+1. **Performance, load, scalability, and stress testing.** Measure latency,
+   throughput, and resource use as note counts and concurrent readers/writers
+   increase; test overload and recovery to establish practical limits.
+2. **Penetration testing and security hardening.** Probe authentication,
+   authorization, input handling, and deployment boundaries, then address
+   findings before broader exposure.
+3. **A client notes app.** Build a dedicated end-user application for reading,
+   editing, and sharing notes, distinct from the developer-facing manual test
+   workbench.
